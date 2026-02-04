@@ -2,8 +2,8 @@
 FastAPI Backend for Hospital Patient Deterioration Prediction System
 Backend API لنظام التنبؤ بتدهور حالة المرضى
 
-This file contains API endpoints with AUTO-TRAINING on first run.
-يقوم بالتدريب التلقائي عند أول تشغيل
+Enhanced version with CSV upload support for multi-hour patient readings
+نسخة محسّنة تدعم رفع ملفات CSV لقراءات متعددة للمريض
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -13,6 +13,9 @@ from typing import List, Optional, Dict
 from datetime import datetime      
 import os
 import uvicorn
+import pandas as pd
+import numpy as np
+import io
 
 # Import ML model
 from ML_Model import PatientRiskModel, get_clinical_recommendations
@@ -20,12 +23,8 @@ from ML_Model import PatientRiskModel, get_clinical_recommendations
 
 # ===== Configuration =====
 
-# مسار ملف البيانات التدريبية
-# Path to training data CSV file
 TRAINING_DATA_PATH = "../data/hospital_deterioration_hourly_panel.csv"  
 
-# معاملات التدريب
-# Training parameters
 TRAINING_CONFIG = {
     "epochs": 100,
     "batch_size": 32,
@@ -37,8 +36,8 @@ TRAINING_CONFIG = {
 
 app = FastAPI(
     title="Hospital Patient Deterioration Prediction API",
-    description="REST API for predicting patient deterioration risk with auto-training",
-    version="2.0.0"
+    description="REST API for predicting patient deterioration risk with CSV upload support",
+    version="3.0.0"
 )
 
 
@@ -61,14 +60,7 @@ ml_model = PatientRiskModel(model_dir="models")
 # ===== Auto-Training Function =====
 
 def auto_train_model():
-    """
-    تدريب النموذج تلقائياً عند أول تشغيل
-    Auto-train model on first run if not already trained
-    
-    Returns:
-        bool: True if training was performed, False if model already exists
-    """
-    # تحقق إذا كان النموذج موجود مسبقاً
+    """تدريب النموذج تلقائياً عند أول تشغيل"""
     if ml_model.is_trained():
         print("✅ Model already trained and loaded")
         return False
@@ -78,25 +70,17 @@ def auto_train_model():
     print("="*70)
     print(f"📁 Looking for training data at: {TRAINING_DATA_PATH}")
     
-    # تحقق من وجود ملف البيانات
     if not os.path.exists(TRAINING_DATA_PATH):
         print(f"\n⚠️  WARNING: Training data not found at {TRAINING_DATA_PATH}")
-        print("   Please ensure sample_data.csv exists in the parent directory")
-        print("   Or update TRAINING_DATA_PATH in main.py")
-        print("\n   Model will NOT be trained automatically.")
-        print("   You can train later via POST /train endpoint")
+        print("   Model will NOT be trained automatically.")
         print("="*70 + "\n")
         return False
     
     print(f"✅ Training data found!")
     print(f"\n🚀 Starting automatic training...")
-    print(f"   Epochs: {TRAINING_CONFIG['epochs']}")
-    print(f"   Batch size: {TRAINING_CONFIG['batch_size']}")
-    print(f"   Validation split: {TRAINING_CONFIG['validation_split']}")
     print("\n" + "="*70 + "\n")
     
     try:
-        # بدء التدريب
         metrics = ml_model.train(
             data_path=TRAINING_DATA_PATH,
             epochs=TRAINING_CONFIG['epochs'],
@@ -112,7 +96,6 @@ def auto_train_model():
         print(f"   Precision: {metrics['precision']*100:.2f}%")
         print(f"   Recall:    {metrics['recall']*100:.2f}% ⭐")
         print(f"   F1-Score:  {metrics['f1_score']*100:.2f}%")
-        print(f"   ROC-AUC:   {metrics['roc_auc']*100:.2f}%")
         print("="*70 + "\n")
         
         return True
@@ -122,38 +105,33 @@ def auto_train_model():
         print("❌ AUTO-TRAINING FAILED")
         print("="*70)
         print(f"Error: {str(e)}")
-        print("\nPlease check:")
-        print("  1. Training data file exists and is valid CSV")
-        print("  2. All required columns are present")
-        print("  3. TensorFlow is installed correctly")
-        print("\nYou can try manual training via POST /train endpoint")
         print("="*70 + "\n")
         return False
 
 
-# ===== Pydantic Models (Data Validation) =====
+# ===== Pydantic Models =====
 
 class PatientData(BaseModel):
     """Patient data input model"""
     patient_id: str
-    age: float = Field(..., ge=0, le=120, description="Patient age in years")
-    gender: int = Field(..., ge=0, le=1, description="0: Female, 1: Male")
-    heart_rate: float = Field(..., ge=30, le=200, description="Heart rate (bpm)")
-    respiratory_rate: float = Field(..., ge=5, le=60, description="Respiratory rate (breaths/min)")
-    spo2_pct: float = Field(..., ge=70, le=100, description="Oxygen saturation (%)")
-    temperature_c: float = Field(..., ge=35, le=42, description="Body temperature (°C)")
-    systolic_bp: float = Field(..., ge=60, le=250, description="Systolic blood pressure (mmHg)")
-    diastolic_bp: float = Field(..., ge=30, le=150, description="Diastolic blood pressure (mmHg)")
-    wbc_count: float = Field(..., ge=1, le=50, description="White blood cell count")
-    lactate: float = Field(..., ge=0, le=20, description="Lactate level (mmol/L)")
-    creatinine: float = Field(..., ge=0.1, le=15, description="Creatinine level (mg/dL)")
-    crp_level: float = Field(..., ge=0, le=500, description="C-reactive protein (mg/L)")
-    hemoglobin: float = Field(..., ge=4, le=20, description="Hemoglobin level (g/dL)")
-    oxygen_flow: float = Field(..., ge=0, le=15, description="Oxygen flow rate (L/min)")
-    oxygen_device: int = Field(..., ge=0, le=3, description="0: None, 1: Nasal, 2: Mask, 3: Ventilator")
-    nurse_alert: int = Field(..., ge=0, le=1, description="0: No, 1: Yes")
-    mobility_score: int = Field(..., ge=0, le=4, description="0: Bedridden, 4: Fully mobile")
-    comorbidity_index: int = Field(..., ge=0, le=10, description="Number of comorbidities")
+    age: float = Field(..., ge=0, le=120)
+    gender: int = Field(..., ge=0, le=1)
+    heart_rate: float = Field(..., ge=30, le=200)
+    respiratory_rate: float = Field(..., ge=5, le=60)
+    spo2_pct: float = Field(..., ge=70, le=100)
+    temperature_c: float = Field(..., ge=35, le=42)
+    systolic_bp: float = Field(..., ge=60, le=250)
+    diastolic_bp: float = Field(..., ge=30, le=150)
+    wbc_count: float = Field(..., ge=1, le=50)
+    lactate: float = Field(..., ge=0, le=20)
+    creatinine: float = Field(..., ge=0.1, le=15)
+    crp_level: float = Field(..., ge=0, le=500)
+    hemoglobin: float = Field(..., ge=4, le=20)
+    oxygen_flow: float = Field(..., ge=0, le=15)
+    oxygen_device: int = Field(..., ge=0, le=3)
+    nurse_alert: int = Field(..., ge=0, le=1)
+    mobility_score: int = Field(..., ge=0, le=4)
+    comorbidity_index: int = Field(..., ge=0, le=10)
 
 
 class PredictionResponse(BaseModel):
@@ -167,39 +145,147 @@ class PredictionResponse(BaseModel):
     recommendations: List[str]
 
 
-class TrainingStatus(BaseModel):
-    """Training status output model"""
-    status: str
-    message: str
-    metrics: Optional[Dict] = None
-    timestamp: str
+class HourlyReading(BaseModel):
+    """Single hourly reading"""
+    hour: int
+    risk_score: float
+    risk_category: str
+    prediction: int
+    spo2: float
+    heart_rate: float
+    temperature: float
+    lactate: float
 
 
-class ModelInfo(BaseModel):
-    """Model information output model"""
-    trained: bool
-    model_type: Optional[str] = None
-    features_count: Optional[int] = None
-    features: Optional[List[str]] = None
-    model_path: Optional[str] = None
-    last_updated: Optional[str] = None
+class CSVPredictionResponse(BaseModel):
+    """Response for CSV file prediction"""
+    patient_id: str
+    total_hours: int
+    deterioration_detected: bool
+    deterioration_hour: Optional[int]
+    final_risk_score: float
+    final_risk_category: str
+    hourly_readings: List[HourlyReading]
+    summary: Dict
+    recommendations: List[str]
+
+
+# ===== Helper Functions =====
+
+def process_csv_file(file_contents: bytes) -> pd.DataFrame:
+    """
+    معالجة ملف CSV وتحويله إلى DataFrame
+    Process CSV file and convert to DataFrame
+    """
+    try:
+        # Read CSV from bytes
+        df = pd.read_csv(io.StringIO(file_contents.decode('utf-8')))
+        
+        # Validate required columns
+        required_columns = [
+            'patient_id', 'age', 'gender', 'heart_rate', 'respiratory_rate',
+            'spo2_pct', 'temperature_c', 'systolic_bp', 'diastolic_bp',
+            'wbc_count', 'lactate', 'creatinine', 'crp_level', 'hemoglobin',
+            'oxygen_flow', 'oxygen_device', 'nurse_alert', 'mobility_score',
+            'comorbidity_index'
+        ]
+        
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
+        
+        return df
+        
+    except Exception as e:
+        raise ValueError(f"Error processing CSV file: {str(e)}")
+
+
+def analyze_patient_trajectory(df: pd.DataFrame) -> Dict:
+    """
+    تحليل مسار المريض عبر الساعات
+    Analyze patient trajectory over hours
+    """
+    if not ml_model.is_trained():
+        raise HTTPException(status_code=503, detail="Model not trained")
+    
+    patient_id = df['patient_id'].iloc[0]
+    hourly_predictions = []
+    deterioration_detected = False
+    deterioration_hour = None
+    
+    # Process each hour
+    for idx, row in df.iterrows():
+        # Extract patient data
+        patient_dict = row.to_dict()
+        
+        # Get prediction
+        result = ml_model.predict(patient_dict)
+        
+        # Store hourly reading
+        hourly_reading = {
+            'hour': int(row.get('hour', idx)),
+            'risk_score': float(result['risk_score']),
+            'risk_category': result['risk_category'],
+            'prediction': int(result['prediction']),
+            'spo2': float(row['spo2_pct']),
+            'heart_rate': float(row['heart_rate']),
+            'temperature': float(row['temperature_c']),
+            'lactate': float(row['lactate'])
+        }
+        
+        hourly_predictions.append(hourly_reading)
+        
+        # Check for deterioration
+        if result['prediction'] == 1 and not deterioration_detected:
+            deterioration_detected = True
+            deterioration_hour = hourly_reading['hour']
+    
+    # Get final reading
+    final_reading = hourly_predictions[-1]
+    
+    # Generate recommendations based on final state
+    final_patient_dict = df.iloc[-1].to_dict()
+    recommendations = get_clinical_recommendations(
+        final_patient_dict, 
+        final_reading['risk_score']
+    )
+    
+    # Calculate summary statistics
+    risk_scores = [r['risk_score'] for r in hourly_predictions]
+    summary = {
+        'min_risk': float(np.min(risk_scores)),
+        'max_risk': float(np.max(risk_scores)),
+        'avg_risk': float(np.mean(risk_scores)),
+        'risk_trend': 'increasing' if risk_scores[-1] > risk_scores[0] else 'stable/decreasing',
+        'hours_high_risk': sum(1 for r in hourly_predictions if r['risk_score'] >= 0.7),
+        'hours_medium_risk': sum(1 for r in hourly_predictions if 0.5 <= r['risk_score'] < 0.7),
+        'hours_low_risk': sum(1 for r in hourly_predictions if r['risk_score'] < 0.5)
+    }
+    
+    return {
+        'patient_id': patient_id,
+        'total_hours': len(hourly_predictions),
+        'deterioration_detected': deterioration_detected,
+        'deterioration_hour': deterioration_hour,
+        'final_risk_score': final_reading['risk_score'],
+        'final_risk_category': final_reading['risk_category'],
+        'hourly_readings': hourly_predictions,
+        'summary': summary,
+        'recommendations': recommendations
+    }
 
 
 # ===== API Endpoints =====
 
 @app.get("/", tags=["Health"])
 async def root():
-    """
-    Health check endpoint
-    
-    Returns API status and basic information
-    """
+    """Health check endpoint"""
     return {
         "status": "online",
         "service": "Hospital Patient Deterioration Prediction API",
         "model_loaded": ml_model.is_trained(),
-        "version": "2.0.0",
-        "auto_training": "enabled",
+        "version": "3.0.0",
+        "features": ["single_prediction", "batch_prediction", "csv_upload"],
         "docs": "/docs"
     }
 
@@ -207,34 +293,21 @@ async def root():
 @app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
 async def predict_deterioration(patient_data: PatientData):
     """
-    Predict patient deterioration risk
+    Predict patient deterioration risk (single reading)
     
-    Takes patient vital signs and lab results, returns risk assessment.
-    
-    Args:
-        patient_data: Patient information with all required features
-        
-    Returns:
-        PredictionResponse with risk score, category, and recommendations
+    التنبؤ بخطر تدهور المريض (قراءة واحدة)
     """
-    # Check if model is trained
     if not ml_model.is_trained():
         raise HTTPException(
             status_code=503,
-            detail="Model not trained. Please ensure training data exists and restart the server."
+            detail="Model not trained"
         )
     
     try:
-        # Convert Pydantic model to dict
         patient_dict = patient_data.dict()
-        
-        # Get prediction from ML model
         result = ml_model.predict(patient_dict)
-        
-        # Generate clinical recommendations
         recommendations = get_clinical_recommendations(patient_dict, result['risk_score'])
         
-        # Prepare response
         response = PredictionResponse(
             patient_id=patient_data.patient_id,
             risk_score=round(result['risk_score'], 3),
@@ -248,33 +321,65 @@ async def predict_deterioration(patient_data: PatientData):
         return response
     
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/csv", response_model=CSVPredictionResponse, tags=["Prediction"])
+async def predict_from_csv(file: UploadFile = File(...)):
+    """
+    Predict patient deterioration from CSV file with multiple hourly readings
+    
+    التنبؤ بتدهور المريض من ملف CSV يحتوي على قراءات متعددة لساعات مختلفة
+    
+    CSV Format:
+    - Must contain columns: hour, patient_id, age, gender, heart_rate, respiratory_rate, 
+      spo2_pct, temperature_c, systolic_bp, diastolic_bp, wbc_count, lactate, 
+      creatinine, crp_level, hemoglobin, oxygen_flow, oxygen_device, 
+      nurse_alert, mobility_score, comorbidity_index
+    - Each row represents one hour of patient data
+    - Sorted by hour (ascending)
+    """
+    # Validate file type
+    if not file.filename.endswith('.csv'):
         raise HTTPException(
-            status_code=500, 
-            detail=f"Prediction error: {str(e)}"
+            status_code=400,
+            detail="Only CSV files are supported. الرجاء رفع ملف CSV فقط"
         )
+    
+    try:
+        # Read file contents
+        contents = await file.read()
+        
+        # Process CSV
+        df = process_csv_file(contents)
+        
+        print(f"\n📊 Processing CSV file: {file.filename}")
+        print(f"   Patient ID: {df['patient_id'].iloc[0]}")
+        print(f"   Total readings: {len(df)}")
+        
+        # Analyze patient trajectory
+        result = analyze_patient_trajectory(df)
+        
+        print(f"   Deterioration detected: {result['deterioration_detected']}")
+        if result['deterioration_detected']:
+            print(f"   Deterioration at hour: {result['deterioration_hour']}")
+        print(f"   Final risk score: {result['final_risk_score']*100:.1f}%")
+        
+        return result
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
 @app.post("/predict/batch", tags=["Prediction"])
 async def predict_batch(patients: List[PatientData]):
-    """
-    Predict deterioration for multiple patients
-    
-    Batch prediction endpoint for processing multiple patients at once.
-    
-    Args:
-        patients: List of patient data
-        
-    Returns:
-        Dictionary with list of predictions and total count
-    """
+    """Batch prediction for multiple patients"""
     if not ml_model.is_trained():
-        raise HTTPException(
-            status_code=503, 
-            detail="Model not trained"
-        )
+        raise HTTPException(status_code=503, detail="Model not trained")
     
     results = []
-    
     for patient in patients:
         try:
             patient_dict = patient.dict()
@@ -299,36 +404,19 @@ async def predict_batch(patients: List[PatientData]):
     }
 
 
-@app.post("/train", response_model=TrainingStatus, tags=["Model Management"])
+@app.post("/train", tags=["Model Management"])
 async def train_model(file: UploadFile = File(...)):
-    """
-    Manually retrain the model with new data
-    
-    Upload a CSV file with training data. The model will be retrained.
-    Note: Auto-training happens on first run, this is for retraining.
-    
-    Args:
-        file: CSV file with patient data and outcomes
-        
-    Returns:
-        TrainingStatus with success/failure and performance metrics
-    """
-    # Validate file type
+    """Manually retrain the model with new data"""
     if not file.filename.endswith('.csv'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported"
-        )
+        raise HTTPException(status_code=400, detail="Only CSV files are supported")
     
     try:
-        # Save uploaded file temporarily
         temp_path = "temp_training_data.csv"
         contents = await file.read()
         
         with open(temp_path, "wb") as f:
             f.write(contents)
         
-        # Train the model
         print(f"📁 Manual retraining with file: {file.filename}")
         metrics = ml_model.train(
             data_path=temp_path,
@@ -337,49 +425,31 @@ async def train_model(file: UploadFile = File(...)):
             validation_split=TRAINING_CONFIG['validation_split']
         )
         
-        # Clean up temporary file
         os.remove(temp_path)
         
-        # Prepare response
-        response = TrainingStatus(
-            status="success",
-            message="Model retrained successfully",
-            metrics=metrics,
-            timestamp=datetime.now().isoformat()
-        )
-        
         print("✅ Manual retraining completed successfully!")
-        return response
+        return {
+            "status": "success",
+            "message": "Model retrained successfully",
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
     
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400, 
-            detail=str(e)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Training error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Training error: {str(e)}")
 
 
 @app.get("/model/status", tags=["Model Management"])
 async def get_model_status():
-    """
-    Get current model status and information
-    
-    Returns information about the loaded model including features and paths.
-    """
+    """Get current model status and information"""
     if not ml_model.is_trained():
         return {
             "trained": False,
-            "message": "Model not trained yet. Check if training data exists and restart server."
+            "message": "Model not trained yet"
         }
     
-    # Get model information
     info = ml_model.get_model_info()
     
-    # Get last modified time of model file
     last_updated = None
     if os.path.exists(ml_model.model_path):
         last_updated = datetime.fromtimestamp(
@@ -398,39 +468,23 @@ async def get_model_status():
 
 @app.get("/model/importance", tags=["Model Management"])
 async def get_feature_importance():
-    """
-    Get feature importance from the trained model
-    
-    Returns ranking of which patient features are most important for predictions.
-    Note: For Neural Networks, this returns equal importance as they don't have
-    built-in feature importance like tree-based models.
-    """
+    """Get feature importance from the trained model"""
     if not ml_model.is_trained():
-        raise HTTPException(
-            status_code=404,
-            detail="Model not trained yet"
-        )
+        raise HTTPException(status_code=404, detail="Model not trained yet")
     
     try:
         importance = ml_model.get_feature_importance()
         return {
             "feature_importance": importance,
-            "note": "Neural Networks don't have built-in feature importance. Consider using SHAP or permutation importance for detailed analysis."
+            "note": "Neural Networks don't have built-in feature importance"
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error getting feature importance: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.delete("/model", tags=["Model Management"])
 async def delete_model():
-    """
-    Delete the current trained model
-    
-    Removes saved model files. Next server restart will retrain automatically.
-    """
+    """Delete the current trained model"""
     try:
         deleted_files = []
         
@@ -446,7 +500,6 @@ async def delete_model():
             os.remove(ml_model.feature_names_path)
             deleted_files.append("feature_names.json")
         
-        # Reset model instance
         ml_model.model = None
         ml_model.scaler = None
         ml_model.feature_names = []
@@ -454,7 +507,7 @@ async def delete_model():
         if deleted_files:
             return {
                 "status": "success",
-                "message": "Model deleted successfully. Restart server to retrain automatically.",
+                "message": "Model deleted successfully",
                 "deleted_files": deleted_files
             }
         else:
@@ -464,29 +517,19 @@ async def delete_model():
             }
     
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error deleting model: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 # ===== Startup Event =====
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Initialize on server startup with AUTO-TRAINING
-    
-    - Checks if model exists
-    - If not, automatically trains using TRAINING_DATA_PATH
-    - If yes, loads existing model
-    """
+    """Initialize on server startup with AUTO-TRAINING"""
     print("\n" + "="*70)
-    print("🏥 Hospital Patient Risk Prediction API v2.0")
-    print("   WITH AUTO-TRAINING ON FIRST RUN")
+    print("🏥 Hospital Patient Risk Prediction API v3.0")
+    print("   WITH CSV UPLOAD SUPPORT")
     print("="*70)
     
-    # تنفيذ التدريب التلقائي
     training_performed = auto_train_model()
     
     if ml_model.is_trained():
@@ -494,7 +537,6 @@ async def startup_event():
         print("\n📊 Model Status:")
         print(f"   ✅ Model Type: {info['model_type']}")
         print(f"   ✅ Architecture: {info['architecture']}")
-        print(f"   ✅ Total Parameters: {info['total_params']:,}")
         print(f"   ✅ Features: {info['n_features']}")
         
         if training_performed:
@@ -503,14 +545,13 @@ async def startup_event():
             print(f"\n   📁 Status: LOADED FROM DISK")
     else:
         print("\n⚠️  Model Status: NOT TRAINED")
-        print("   Predictions will NOT be available until model is trained")
         print(f"   Place training data at: {TRAINING_DATA_PATH}")
-        print("   Or use POST /train endpoint to upload data")
     
     print("\n" + "="*70)
     print(f"📡 API running at: http://localhost:8000")
     print(f"📖 Documentation: http://localhost:8000/docs")
-    print(f"🎯 Predictions: http://localhost:8000/predict")
+    print(f"🎯 Single Prediction: POST /predict")
+    print(f"📊 CSV Upload: POST /predict/csv")
     print("="*70 + "\n")
 
 

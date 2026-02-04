@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import './PatientHistory.css';
+// Dashboard.js
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import './Dashboard.css';
 
-function PatientHistory() {
+function Dashboard() {
   const [predictions, setPredictions] = useState([]);
   const [filteredPredictions, setFilteredPredictions] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -11,6 +13,9 @@ function PatientHistory() {
 
   useEffect(() => {
     loadPredictions();
+    // Refresh data every 5 seconds to catch new predictions
+    const interval = setInterval(loadPredictions, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -123,6 +128,13 @@ function PatientHistory() {
     URL.revokeObjectURL(url);
   };
 
+  const printPrediction = (pred) => {
+    setSelectedPrediction(pred);
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
   const getStats = () => {
     const total = predictions.length;
     const high = predictions.filter(p => p.risk_score * 100 >= 70).length;
@@ -139,18 +151,26 @@ function PatientHistory() {
 
   return (
     <div className="patient-history">
-      <div className="page-header">
+      <div className="page-header no-print">
         <h2>📚 سجل المرضى - Patient History</h2>
         <p>عرض جميع التنبؤات السابقة - View all past predictions and assessments</p>
+        <div className="header-quick-links">
+          <Link to="/patients" className="quick-link">
+            👥 إدارة المرضى - Manage Patients
+          </Link>
+          <Link to="/predict" className="quick-link">
+            📊 تحليل CSV - CSV Analysis
+          </Link>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="stats-cards">
+      <div className="stats-cards no-print">
         <div className="stat-card total-card">
           <div className="stat-icon">📊</div>
           <div className="stat-info">
             <div className="stat-value">{stats.total}</div>
-            <div className="stat-label">إجمالي - Total</div>
+            <div className="stat-label">إجمالي السجلات<br/>Total Records</div>
           </div>
         </div>
         
@@ -158,7 +178,7 @@ function PatientHistory() {
           <div className="stat-icon">🚨</div>
           <div className="stat-info">
             <div className="stat-value">{stats.high}</div>
-            <div className="stat-label">خطر عالي - High</div>
+            <div className="stat-label">خطر عالي<br/>High Risk</div>
           </div>
         </div>
         
@@ -166,7 +186,7 @@ function PatientHistory() {
           <div className="stat-icon">⚠️</div>
           <div className="stat-info">
             <div className="stat-value">{stats.medium}</div>
-            <div className="stat-label">خطر متوسط - Medium</div>
+            <div className="stat-label">خطر متوسط<br/>Medium Risk</div>
           </div>
         </div>
         
@@ -174,13 +194,13 @@ function PatientHistory() {
           <div className="stat-icon">✅</div>
           <div className="stat-info">
             <div className="stat-value">{stats.low}</div>
-            <div className="stat-label">خطر منخفض - Low</div>
+            <div className="stat-label">خطر منخفض<br/>Low Risk</div>
           </div>
         </div>
       </div>
 
       {/* Controls */}
-      <div className="history-controls">
+      <div className="history-controls no-print">
         <div className="search-section">
           <div className="search-input">
             <span className="search-icon">🔍</span>
@@ -225,14 +245,14 @@ function PatientHistory() {
             📥 JSON تصدير
           </button>
           <button className="btn-danger" onClick={clearHistory}>
-            🗑️ مسح الكل - Clear
+            🗑️ مسح الكل
           </button>
         </div>
       </div>
 
       {/* Results */}
       {filteredPredictions.length === 0 ? (
-        <div className="no-data">
+        <div className="no-data no-print">
           <div className="no-data-icon">📭</div>
           <h3>لا توجد نتائج - No Results Found</h3>
           <p>
@@ -254,7 +274,7 @@ function PatientHistory() {
                   <th>التنبؤ<br/>Prediction</th>
                   <th>الثقة<br/>Confidence</th>
                   <th>التاريخ<br/>Date</th>
-                  <th>إجراء<br/>Action</th>
+                  <th className="no-print">إجراء<br/>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -291,12 +311,12 @@ function PatientHistory() {
                       <br/>
                       <small>{new Date(pred.timestamp).toLocaleTimeString('ar-PS')}</small>
                     </td>
-                    <td>
+                    <td className="no-print">
                       <button 
                         className="btn-view-details"
                         onClick={() => setSelectedPrediction(pred)}
                       >
-                        👁️ عرض - View
+                        👁️ عرض
                       </button>
                     </td>
                   </tr>
@@ -305,7 +325,7 @@ function PatientHistory() {
             </table>
           </div>
           
-          <div className="table-footer">
+          <div className="table-footer no-print">
             <p>عرض {filteredPredictions.length} من {predictions.length} سجل</p>
             <p>Showing {filteredPredictions.length} of {predictions.length} records</p>
           </div>
@@ -314,7 +334,7 @@ function PatientHistory() {
 
       {/* Detail Modal */}
       {selectedPrediction && (
-        <div className="modal-overlay" onClick={() => setSelectedPrediction(null)}>
+        <div className="modal-overlay no-print" onClick={() => setSelectedPrediction(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>📋 تفاصيل التنبؤ - Prediction Details</h3>
@@ -374,7 +394,7 @@ function PatientHistory() {
               {/* Patient Data */}
               {selectedPrediction.input_data && (
                 <div className="modal-section">
-                  <h4>بيانات المريض - Patient Data</h4>
+                  <h4>📊 بيانات المريض - Patient Data</h4>
                   <div className="patient-data-grid">
                     <div className="data-item">
                       <span>العمر - Age:</span>
@@ -392,6 +412,51 @@ function PatientHistory() {
                       <span>SpO2:</span>
                       <strong>{selectedPrediction.input_data.spo2_pct}%</strong>
                     </div>
+                    {selectedPrediction.input_data.temperature && (
+                      <div className="data-item">
+                        <span>Temp:</span>
+                        <strong>{selectedPrediction.input_data.temperature}°C</strong>
+                      </div>
+                    )}
+                    {selectedPrediction.input_data.lactate && (
+                      <div className="data-item">
+                        <span>Lactate:</span>
+                        <strong>{selectedPrediction.input_data.lactate}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Analysis Summary (if from CSV upload) */}
+              {selectedPrediction.analysis_summary && (
+                <div className="modal-section">
+                  <h4>📈 ملخص التحليل - Analysis Summary</h4>
+                  <div className="patient-data-grid">
+                    <div className="data-item">
+                      <span>أدنى خطر - Min Risk:</span>
+                      <strong>{(selectedPrediction.analysis_summary.min_risk * 100).toFixed(1)}%</strong>
+                    </div>
+                    <div className="data-item">
+                      <span>متوسط - Avg Risk:</span>
+                      <strong>{(selectedPrediction.analysis_summary.avg_risk * 100).toFixed(1)}%</strong>
+                    </div>
+                    <div className="data-item">
+                      <span>أعلى خطر - Max Risk:</span>
+                      <strong>{(selectedPrediction.analysis_summary.max_risk * 100).toFixed(1)}%</strong>
+                    </div>
+                    <div className="data-item">
+                      <span>الاتجاه - Trend:</span>
+                      <strong>{selectedPrediction.analysis_summary.risk_trend}</strong>
+                    </div>
+                    <div className="data-item">
+                      <span>ساعات خطر عالي:</span>
+                      <strong>{selectedPrediction.analysis_summary.hours_high_risk}</strong>
+                    </div>
+                    <div className="data-item">
+                      <span>ساعات خطر متوسط:</span>
+                      <strong>{selectedPrediction.analysis_summary.hours_medium_risk}</strong>
+                    </div>
                   </div>
                 </div>
               )}
@@ -399,7 +464,7 @@ function PatientHistory() {
               {/* Recommendations */}
               {selectedPrediction.recommendations && (
                 <div className="modal-section">
-                  <h4>📋 التوصيات - Recommendations</h4>
+                  <h4>💡 التوصيات - Recommendations</h4>
                   <ul className="modal-recommendations">
                     {selectedPrediction.recommendations.map((rec, idx) => (
                       <li key={idx}>{rec}</li>
@@ -407,6 +472,22 @@ function PatientHistory() {
                   </ul>
                 </div>
               )}
+
+              {/* Modal Actions */}
+              <div className="modal-actions">
+                <button 
+                  className="btn-primary"
+                  onClick={() => printPrediction(selectedPrediction)}
+                >
+                  🖨️ طباعة - Print
+                </button>
+                <button 
+                  className="btn-secondary"
+                  onClick={() => setSelectedPrediction(null)}
+                >
+                  ✕ إغلاق - Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -415,4 +496,4 @@ function PatientHistory() {
   );
 }
 
-export default PatientHistory;
+export default Dashboard;
